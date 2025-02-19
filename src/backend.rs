@@ -47,6 +47,7 @@ pub mod c {
         }
 
         fp.flush()?;
+        tracing::debug!("Emitting header into done.");
         Ok(())
     }
 
@@ -71,6 +72,7 @@ pub mod c {
         fp.write(num_trees.to_string().as_bytes())?;
         fp.write(".0;\n  return result;\n}".as_bytes())?;
         fp.flush()?;
+        tracing::debug!("Emitting main done.");
         Ok(())
     }
 
@@ -101,32 +103,25 @@ pub mod c {
                 fp.write(")".as_bytes())?;
                 fp.write("{\n".as_bytes())?;
 
-                let left_child_node = nodes.iter().filter(|i| node_matches(left_child, i)).next();
+                let left_child_node = nodes
+                    .iter()
+                    .filter(|i| node_matches(left_child, i))
+                    .next()
+                    .unwrap();
 
-                match left_child_node {
-                    Some(left) => {
-                        emit_node(nodes, left, depth + 1, fp)?;
-                        fp.write(indent.as_bytes())?;
-                        fp.write("} else {\n".as_bytes())?;
-                    }
-                    None => {
-                        anyhow::bail!("No node found for {}", left_child);
-                    }
-                }
+                emit_node(nodes, left_child_node, depth + 1, fp)?;
+                fp.write(indent.as_bytes())?;
+                fp.write("} else {\n".as_bytes())?;
 
-                let right_child_node = nodes.iter().filter(|i| node_matches(right_child, i)).next();
+                let right_child_node = nodes
+                    .iter()
+                    .filter(|i| node_matches(right_child, i))
+                    .next()
+                    .unwrap();
 
-                match right_child_node {
-                    Some(right) => {
-                        emit_node(nodes, right, depth + 1, fp)?;
-                        fp.write(indent.as_bytes())?;
-                        fp.write("}\n".as_bytes())?;
-                    }
-                    None => {
-                        anyhow::bail!("No node found for {}", left_child);
-                    }
-                }
-
+                emit_node(nodes, right_child_node, depth + 1, fp)?;
+                fp.write(indent.as_bytes())?;
+                fp.write("}\n".as_bytes())?;
                 Ok(())
             }
             Node::Leaf(Leaf {
@@ -163,6 +158,7 @@ pub mod c {
             &mut fp,
         )?;
         fp.write("\n}".as_bytes())?;
+        fp.flush()?;
 
         Ok(())
     }
@@ -173,6 +169,8 @@ pub mod c {
                 anyhow::bail!("Failed to created directory: {}", err);
             }
         }
+
+        tracing::info!("Emitting C into {} ...", path);
 
         let heeader_path = std::format!("{}/header.h", path);
         let header_path = std::path::Path::new(heeader_path.as_str());
@@ -195,19 +193,5 @@ pub mod c {
 
         result?;
         Ok(())
-    }
-}
-
-pub mod java {
-
-    use std::io::Write;
-
-    use crate::ir::{Leaf, ModelIR, Node, TestNode};
-    use anyhow::Result;
-
-    use super::node_matches;
-
-    pub fn emit(_model: &ModelIR, _path: &str) -> Result<()> {
-        anyhow::bail!("Not implemented")
     }
 }

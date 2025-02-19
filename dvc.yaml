@@ -1,0 +1,29 @@
+stages:
+  export_model:
+    cmd: uv run scripts/export_model.py
+    deps: 
+      - scripts/export_model.py
+    outs:
+      - data/model.json
+      - data/X_test.npy
+      - data/y_pred.npy
+  emit_c:
+    cmd: cargo run --release -- --source=data/model.json --destination=data/cc/
+    deps:
+      - src/
+      - data/model.json
+    outs:
+      - data/cc/
+  compile_model:
+    cmd: cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang .;cmake --build . -j 8
+    deps:
+      - CMakeLists.txt
+      - data/cc/
+    outs:
+      - data/libmodel.so
+  verify_model:
+    cmd: uv run scripts/verify_model.py
+    deps: 
+      - scripts/verify_model.py
+      - data/X_test.npy
+      - data/y_pred.npy

@@ -545,7 +545,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tl2jgen"
+name = "tl2cgen-rs"
 version = "0.1.0"
 dependencies = [
  "anyhow",

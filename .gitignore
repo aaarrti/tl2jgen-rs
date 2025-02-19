@@ -6,3 +6,9 @@
 .venv
 data
 __pycache__
+CMakeFiles
+CMakeCache.txt
+perf.data*
+.env
+Makefile
+cmake_install.cmake

@@ -1,5 +1,5 @@
 [project]
-name = "tl2jgen"
+name = "tl2cgen-rs"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -13,4 +13,5 @@ dev = [
     "scikit-learn>=1.6.1",
     "tl2cgen>=1.0.0",
     "treelite>=4.4.1",
+    "dvc>=3.59.1",
 ]

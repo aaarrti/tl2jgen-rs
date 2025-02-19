@@ -143,7 +143,7 @@ mod binary {
     use super::ModelIR;
     use anyhow::Result;
 
-    pub fn decode(path: &str) -> Result<ModelIR> {
+    pub fn decode(_path: &str) -> Result<ModelIR> {
         anyhow::bail!("Not implemented")
     }
 }
