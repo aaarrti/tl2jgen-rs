@@ -1,0 +1,19 @@
+[package]
+name = "tl2jgen"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.95"
+clap = { version = "4.5.30", features = ["derive"] }
+indicatif = { version = "0.17.11", features = ["rayon"] }
+rayon = "1.10.0"
+serde = { version = "1.0.217", features = ["derive"] }
+serde_json = "1.0.138"
+tracing = { version = "0.1.40", features = ["log"] }
+tracing-subscriber = { version = "0.3", features = ["chrono", "ansi", "std", "env-filter"] }
+
+
+[profile.release]
+lto = true
+codegen-units = 1

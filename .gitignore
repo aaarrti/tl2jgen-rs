@@ -1,0 +1,8 @@
+/target
+.vscode
+.history
+.idea
+.DS_Store
+.venv
+data
+__pycache__
