@@ -137,13 +137,3 @@ pub mod json {
         })
     }
 }
-
-mod binary {
-
-    use super::ModelIR;
-    use anyhow::Result;
-
-    pub fn decode(_path: &str) -> Result<ModelIR> {
-        anyhow::bail!("Not implemented")
-    }
-}

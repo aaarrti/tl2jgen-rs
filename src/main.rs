@@ -1,8 +1,6 @@
 mod backend;
 mod ir;
 
-use tracing;
-use tracing_subscriber;
 use tracing_subscriber::EnvFilter;
 
 use anyhow::{Context, Result};

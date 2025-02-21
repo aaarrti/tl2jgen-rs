@@ -36,14 +36,14 @@ pub mod c {
         tracing::debug!("Emitting header into {:?}...", path);
         let mut fp = buf_writer(path);
 
-        fp.write("#define EXPORT __attribute__((visibility(\"default\")))\n\n".as_bytes())?;
-        fp.write("EXPORT int get_num_features(void);\n".as_bytes())?;
-        fp.write("EXPORT double predict(double* data);\n\n".as_bytes())?;
+        fp.write_all(b"#define EXPORT __attribute__((visibility(\"default\")))\n\n")?;
+        fp.write_all(b"EXPORT int get_num_features(void);\n")?;
+        fp.write_all(b"EXPORT double predict(double* data);\n\n")?;
 
         for tu_id in 0..num_trees {
-            fp.write("void predict_unit".as_bytes())?;
-            fp.write(tu_id.to_string().as_bytes())?;
-            fp.write("(double* data, double* result);\n".as_bytes())?;
+            fp.write_all(b"void predict_unit")?;
+            fp.write_all(tu_id.to_string().as_bytes())?;
+            fp.write_all(b"(double* data, double* result);\n")?;
         }
 
         fp.flush()?;
@@ -54,23 +54,23 @@ pub mod c {
     fn emit_main(path: &std::path::Path, num_trees: usize, num_features: u32) -> Result<()> {
         tracing::debug!("Emitting main into {:?}...", path);
         let mut fp = buf_writer(path);
-        fp.write("#include \"header.h\"\n\n".as_bytes())?;
-        fp.write("EXPORT int get_num_features(void){\n".as_bytes())?;
+        fp.write_all(b"#include \"header.h\"\n\n")?;
+        fp.write_all(b"EXPORT int get_num_features(void){\n")?;
 
-        fp.write("  return ".as_bytes())?;
-        fp.write(num_features.to_string().as_bytes())?;
-        fp.write(";\n}\n".as_bytes())?;
+        fp.write_all(b"  return ")?;
+        fp.write_all(num_features.to_string().as_bytes())?;
+        fp.write_all(b";\n}\n")?;
 
-        fp.write("EXPORT double predict(double* data){\n  double result = 0;\n".as_bytes())?;
+        fp.write_all(b"EXPORT double predict(double* data){\n  double result = 0;\n")?;
 
         for tu_id in 0..num_trees {
-            fp.write("  predict_unit".as_bytes())?;
-            fp.write(tu_id.to_string().as_bytes())?;
-            fp.write("(data, &result);\n".as_bytes())?;
+            fp.write_all(b"  predict_unit")?;
+            fp.write_all(tu_id.to_string().as_bytes())?;
+            fp.write_all(b"(data, &result);\n")?;
         }
-        fp.write("  result /= ".as_bytes())?;
-        fp.write(num_trees.to_string().as_bytes())?;
-        fp.write(".0;\n  return result;\n}".as_bytes())?;
+        fp.write_all(b"  result /= ")?;
+        fp.write_all(num_trees.to_string().as_bytes())?;
+        fp.write_all(b".0;\n  return result;\n}")?;
         fp.flush()?;
         tracing::debug!("Emitting main done.");
         Ok(())
@@ -93,45 +93,37 @@ pub mod c {
                 left_child,
                 right_child,
             }) => {
-                fp.write(indent.as_bytes())?;
-                fp.write("if(data[".as_bytes())?;
-                fp.write(split_feature_id.to_string().as_bytes())?;
-                fp.write("] ".as_bytes())?;
-                fp.write(comparison_op.as_bytes())?;
-                fp.write(" (double)".as_bytes())?;
-                fp.write(threshold.to_string().as_bytes())?;
-                fp.write(")".as_bytes())?;
-                fp.write("{\n".as_bytes())?;
+                fp.write_all(indent.as_bytes())?;
+                fp.write_all(b"if(data[")?;
+                fp.write_all(split_feature_id.to_string().as_bytes())?;
+                fp.write_all(b"] ")?;
+                fp.write_all(comparison_op.as_bytes())?;
+                fp.write_all(b" (double)")?;
+                fp.write_all(threshold.to_string().as_bytes())?;
+                fp.write_all(b")")?;
+                fp.write_all(b"{\n")?;
 
-                let left_child_node = nodes
-                    .iter()
-                    .filter(|i| node_matches(left_child, i))
-                    .next()
-                    .unwrap();
+                let left_child_node = nodes.iter().find(|i| node_matches(left_child, i)).unwrap();
 
                 emit_node(nodes, left_child_node, depth + 1, fp)?;
-                fp.write(indent.as_bytes())?;
-                fp.write("} else {\n".as_bytes())?;
+                fp.write_all(indent.as_bytes())?;
+                fp.write_all(b"} else {\n")?;
 
-                let right_child_node = nodes
-                    .iter()
-                    .filter(|i| node_matches(right_child, i))
-                    .next()
-                    .unwrap();
+                let right_child_node = nodes.iter().find(|i| node_matches(right_child, i)).unwrap();
 
                 emit_node(nodes, right_child_node, depth + 1, fp)?;
-                fp.write(indent.as_bytes())?;
-                fp.write("}\n".as_bytes())?;
+                fp.write_all(indent.as_bytes())?;
+                fp.write_all(b"}\n")?;
                 Ok(())
             }
             Node::Leaf(Leaf {
                 node_id: _,
                 leaf_value,
             }) => {
-                fp.write(indent.as_bytes())?;
-                fp.write("result[0] += ".as_bytes())?;
-                fp.write(leaf_value.to_string().as_bytes())?;
-                fp.write(";\n".as_bytes())?;
+                fp.write_all(indent.as_bytes())?;
+                fp.write_all(b"result[0] += ")?;
+                fp.write_all(leaf_value.to_string().as_bytes())?;
+                fp.write_all(b";\n")?;
                 fp.flush()?;
 
                 Ok(())
@@ -145,19 +137,19 @@ pub mod c {
         let tu_path = path.join(tu_path);
         let mut fp = buf_writer(tu_path.as_path());
 
-        fp.write("#include \"header.h\"\n\n".as_bytes())?;
+        fp.write_all(b"#include \"header.h\"\n\n")?;
 
-        fp.write("void predict_unit".as_bytes())?;
-        fp.write(tu_id.to_string().as_bytes())?;
-        fp.write("(double* data, double* result){\n".as_bytes())?;
+        fp.write_all(b"void predict_unit")?;
+        fp.write_all(tu_id.to_string().as_bytes())?;
+        fp.write_all(b"(double* data, double* result){\n")?;
 
         emit_node(
             tree.nodes.as_slice(),
-            tree.nodes.get(0).unwrap(),
+            tree.nodes.first().unwrap(),
             1,
             &mut fp,
         )?;
-        fp.write("\n}".as_bytes())?;
+        fp.write_all(b"\n}")?;
         fp.flush()?;
 
         Ok(())
