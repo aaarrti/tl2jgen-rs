@@ -1,10 +1,11 @@
-import numpy as np
-
 from sklearn.datasets import make_regression
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 
 import treelite.sklearn
+import tl2cgen
+
+import json
 
 
 def main():
@@ -14,18 +15,24 @@ def main():
     )
 
     model = RandomForestRegressor(
-        n_estimators=40, max_depth=10, random_state=22, verbose=2, n_jobs=-1
+        n_estimators=20, max_depth=10, random_state=22, verbose=2, n_jobs=-1
     )
     model.fit(X_train, y_train)
 
     y_pred = model.predict(X_test)
 
-    np.save("data/X_test.npy", X_test, allow_pickle=False)
-    np.save("data/y_pred.npy", y_pred, allow_pickle=False)
-
     treelite_model = treelite.sklearn.import_model(model)
-    with open("data/model.json", "w+") as f:
+
+    with open("data/random_forest/model.json", "w+") as f:
         f.write(treelite_model.dump_as_json())
+
+    with open("test/src/test/resources/random_forest.json", "w+") as f:
+
+        json.dump({"X": X[:100].tolist(), "y_pred": y_pred.tolist()}, f, indent=4)
+
+    tl2cgen.generate_c_code(
+        treelite_model, dirpath="data/random_forest/c", params={"parallel_comp": 20}
+    )
 
 
 if __name__ == "__main__":

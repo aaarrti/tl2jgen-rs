@@ -6,9 +6,11 @@
 .venv
 data
 __pycache__
-CMakeFiles
-CMakeCache.txt
 perf.data*
 .env
-Makefile
-cmake_install.cmake
+
+test/src/main/java/
+test/src/test/java/
+test/src/test/resources/
+test/.gradle
+test/build/

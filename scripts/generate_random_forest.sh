@@ -1,0 +1,1 @@
+cargo run  --release -- --source data/random_forest/model.json --destination test/src/main/java --package com.github.aaarrti.randomforest
