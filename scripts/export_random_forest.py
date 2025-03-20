@@ -26,9 +26,11 @@ def main():
     with open("data/random_forest/model.json", "w+") as f:
         f.write(treelite_model.dump_as_json())
 
-    with open("test/src/test/resources/random_forest.json", "w+") as f:
+    with open("example/src/test/resources/random_forest.json", "w+") as f:
 
-        json.dump({"X": X[:100].tolist(), "y_pred": y_pred.tolist()}, f, indent=4)
+        json.dump(
+            {"X": X_test[:100].tolist(), "y_pred": y_pred[:100].tolist()}, f, indent=4
+        )
 
     tl2cgen.generate_c_code(
         treelite_model, dirpath="data/random_forest/c", params={"parallel_comp": 20}

@@ -195,7 +195,7 @@ fn buf_writer(path: &str) -> Result<std::io::BufWriter<std::fs::File>> {
     Ok(std::io::BufWriter::with_capacity(1024 * 1024, file))
 }
 
-#[tracing::instrument(err)]
+#[tracing::instrument(err, level = "trace")]
 fn emit_node(
     node: &Node,
     nodes: &HashMap<u32, Node>,
@@ -239,8 +239,15 @@ fn emit_node(
             leaf_value,
         }) => {
             fp.write_all(indent.as_bytes())?;
-            fp.write_all(b"result += ")?;
-            fp.write_all(leaf_value.to_string().as_bytes())?;
+
+            if *leaf_value < 0.0 {
+                fp.write_all(b"result -= ")?;
+                fp.write_all(leaf_value.abs().to_string().as_bytes())?;
+            } else {
+                fp.write_all(b"result += ")?;
+                fp.write_all(leaf_value.to_string().as_bytes())?;
+            }
+
             fp.write_all(b";\n")?;
             fp.flush()?;
         }
@@ -256,31 +263,21 @@ fn emit_tree(tree: &Tree, destination: &str, tu_id: u32, package: &str) -> Resul
     let destination = destination.join(file_name);
     let destination = destination.to_str().unwrap();
 
-    tracing::info!("Emitting tree into {:?}...", destination);
-
+    tracing::info!("Emitting tree into {:?} ...", destination);
     let mut fp = buf_writer(destination)?;
 
     fp.write_all(b"package ")?;
     fp.write_all(package.as_bytes())?;
     fp.write_all(b";\n\n")?;
-
-    fp.write_all(b"static final class Tree")?;
+    fp.write_all(b"final class Tree")?;
     fp.write_all(tu_id.to_string().as_bytes())?;
-
     fp.write_all(b"{\n\n")?;
-
-    fp.write_all(b"  double predict(double arr[]){\n")?;
-
-    fp.write_all(b"  double result = 0.0;\n")?;
-
-    emit_node(tree.first_node(), &tree.0, 1, &mut fp)?;
-
-    fp.write_all(b"  return result;\n")?;
-
-    fp.write_all(b"}")?;
+    fp.write_all(b"  public static double predict(double[] arr){\n")?;
+    fp.write_all(b"    double result = 0.0;\n")?;
+    emit_node(tree.first_node(), &tree.0, 2, &mut fp)?;
+    fp.write_all(b"    return result;\n  }\n}")?;
 
     fp.flush()?;
-
     Ok(())
 }
 
@@ -301,18 +298,14 @@ fn emit_ensemble(
     fp.write_all(b"package ")?;
     fp.write_all(package.as_bytes())?;
     fp.write_all(b";\n\n")?;
-
-    fp.write_all(b"public static final class TreeEnsemble {\n\n")?;
-
+    fp.write_all(b"public final class TreeEnsemble {\n\n")?;
     fp.write_all(b"  private TreeEnsemble(){ }\n")?;
-
     fp.write_all(b"  private static final int NUM_FEATURES = ")?;
     fp.write_all(num_features.to_string().as_bytes())?;
     fp.write_all(b";\n\n")?;
 
     fp.write_all(b"  public static double predict(double[] arr){\n")?;
     fp.write_all(b"     assert arr.length == NUM_FEATURES;\n")?;
-
     fp.write_all(b"     double result = 0.0;\n")?;
 
     for tu_id in 0..num_trees {
@@ -323,7 +316,8 @@ fn emit_ensemble(
 
     fp.write_all(b"     result /= ")?;
     fp.write_all(num_trees.to_string().as_bytes())?;
-    fp.write_all(b".0;\n     return result;\n}")?;
+    fp.write_all(b".0;\n     return result;\n  }\n\n}")?;
+
     fp.flush()?;
     tracing::debug!("Emitting ensemble done.");
     Ok(())

@@ -1,1 +1,6 @@
-cargo run  --release -- --source data/random_forest/model.json --destination test/src/main/java --package com.github.aaarrti.randomforest
+#!/bin/zsh
+
+cargo run -- \
+  --source data/random_forest/model.json \
+  --destination example/src/main/java \
+  --package com.github.aaarrti.tl2jgen.randomforest

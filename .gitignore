@@ -8,9 +8,3 @@ data
 __pycache__
 perf.data*
 .env
-
-test/src/main/java/
-test/src/test/java/
-test/src/test/resources/
-test/.gradle
-test/build/
