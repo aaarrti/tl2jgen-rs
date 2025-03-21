@@ -9,11 +9,11 @@ use tracing_subscriber::EnvFilter;
 #[derive(Debug, Clone, Parser)]
 pub struct Cli {
     #[arg(short, long)]
-    pub source: String,
+    source: String,
     #[arg(short, long)]
-    pub destination: String,
+    destination: String,
     #[arg(short, long)]
-    pub package: String,
+    package: String,
 }
 
 fn setup_tracing() -> Result<()> {
@@ -35,6 +35,7 @@ mod parser {
     #[derive(Clone, Debug, Deserialize)]
     pub struct Tree {
         pub nodes: Vec<UnknownNode>,
+        pub has_categorical_split: bool,
     }
 
     #[derive(Clone, Debug, Deserialize)]
@@ -49,6 +50,7 @@ mod parser {
         pub right_child: Option<u32>,
         pub node_type: Option<String>,
         pub has_categorical_split: Option<bool>,
+        pub category_list: Option<Vec<u32>>,
     }
 
     #[derive(Debug, Clone, Deserialize)]
@@ -59,29 +61,41 @@ mod parser {
         pub average_tree_output: bool,
         pub num_target: u32,
         pub trees: Vec<Tree>,
+        pub base_scores: Vec<f64>,
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Leaf {
-    pub node_id: u32,
-    pub leaf_value: f64,
+struct Leaf {
+    node_id: u32,
+    leaf_value: f64,
 }
 
 #[derive(Debug, Clone)]
-pub struct TestNode {
-    pub node_id: u32,
-    pub split_feature_id: u32,
-    pub comparison_op: String,
-    pub threshold: f64,
-    pub left_child: u32,
-    pub right_child: u32,
+struct TestNode {
+    node_id: u32,
+    split_feature_id: u32,
+    comparison_op: String,
+    threshold: f64,
+    left_child: u32,
+    right_child: u32,
+}
+
+/// category_list_right_child = true
+#[derive(Debug, Clone)]
+struct CategoricalTestNode {
+    node_id: u32,
+    left_child: u32,
+    right_child: u32,
+    split_feature_id: u32,
+    category_list: Vec<u32>,
 }
 
 #[derive(Debug, Clone)]
-pub enum Node {
+enum Node {
     Leaf(Leaf),
     TestNode(TestNode),
+    Categorical(CategoricalTestNode),
 }
 
 impl Node {
@@ -89,23 +103,29 @@ impl Node {
         match self {
             Node::Leaf(leaf) => leaf.node_id,
             Node::TestNode(test_node) => test_node.node_id,
+            Node::Categorical(cat) => cat.node_id,
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct Tree(HashMap<u32, Node>);
+struct Tree {
+    inner: HashMap<u32, Node>,
+    has_categorical_split: bool,
+}
 
 impl Tree {
     fn first_node(&self) -> &Node {
-        self.0.get(&0).unwrap()
+        self.inner.get(&0).unwrap()
     }
 }
 
 #[derive(Debug, Clone)]
 struct DecisionTreeModel {
-    pub num_features: u32,
+    num_features: u32,
     trees: Vec<Tree>,
+    average_tree_output: bool,
+    base_score: f64,
 }
 
 impl TryFrom<parser::UnknownNode> for Node {
@@ -118,22 +138,31 @@ impl TryFrom<parser::UnknownNode> for Node {
         }
 
         if let Some(node_type) = value.node_type.as_deref() {
-            if node_type != "numerical_test_node" {
-                anyhow::bail!("Not supported node type: {}", node_type);
+            match node_type {
+                "numerical_test_node" => Ok(Node::TestNode(TestNode {
+                    node_id: value.node_id,
+                    split_feature_id: value.split_feature_id.unwrap(),
+                    comparison_op: value.comparison_op.as_deref().unwrap().to_string(),
+                    threshold: value.threshold.unwrap(),
+                    left_child: value.left_child.unwrap(),
+                    right_child: value.right_child.unwrap(),
+                })),
+
+                "categorical_test_node" => Ok(Node::Categorical(CategoricalTestNode {
+                    node_id: value.node_id,
+                    left_child: value.left_child.unwrap(),
+                    right_child: value.right_child.unwrap(),
+                    split_feature_id: value.split_feature_id.unwrap(),
+                    category_list: value.category_list.unwrap(),
+                })),
+
+                _ => anyhow::bail!("Not supported node type: {}", node_type),
             }
 
-            if let Some(false) = value.default_left {
-                anyhow::bail!("Not supported default left");
-            }
-
-            Ok(Node::TestNode(TestNode {
-                node_id: value.node_id,
-                split_feature_id: value.split_feature_id.unwrap(),
-                comparison_op: value.comparison_op.as_deref().unwrap().to_string(),
-                threshold: value.threshold.unwrap(),
-                left_child: value.left_child.unwrap(),
-                right_child: value.right_child.unwrap(),
-            }))
+            // this one is probably used only for __builtin_expect
+            //if let Some(false) = value.default_left {
+            //    anyhow::bail!("Not supported default left");
+            //}
         } else {
             Ok(Node::Leaf(Leaf {
                 node_id: value.node_id,
@@ -146,7 +175,7 @@ impl TryFrom<parser::UnknownNode> for Node {
 impl TryFrom<&parser::Tree> for Tree {
     type Error = anyhow::Error;
 
-    #[tracing::instrument(err)]
+    #[tracing::instrument(err, skip_all)]
     fn try_from(value: &parser::Tree) -> Result<Self, Self::Error> {
         let mut hash_map: HashMap<u32, Node> = HashMap::with_capacity(value.nodes.len());
 
@@ -155,7 +184,10 @@ impl TryFrom<&parser::Tree> for Tree {
 
             hash_map.insert(node.id(), node);
         }
-        Ok(Tree(hash_map))
+        Ok(Tree {
+            inner: hash_map,
+            has_categorical_split: value.has_categorical_split,
+        })
     }
 }
 
@@ -166,11 +198,12 @@ impl DecisionTreeModel {
         let file = std::fs::File::open(path)?;
         let reader = std::io::BufReader::with_capacity(1024 * 1024, file);
         let json: parser::ModelJSON = serde_json::from_reader(reader)?;
-        anyhow::ensure!(json.average_tree_output, "Unsupported average tree output");
+
         anyhow::ensure!(
-            json.leaf_output_type == "float64",
+            json.leaf_output_type == "float64" || json.leaf_output_type == "float32",
             std::format!("Unsupported leaf output type: {}", json.leaf_output_type)
         );
+
         anyhow::ensure!(
             json.num_target == 1,
             std::format!("Unsupported num target: {}", json.num_target)
@@ -182,9 +215,20 @@ impl DecisionTreeModel {
         tracing::debug!("Converting nodes ...");
         let trees: Result<Vec<Tree>> = json.trees.iter().map(|i| i.try_into()).collect();
         let trees = trees?;
+
+        anyhow::ensure!(
+            json.base_scores.len() == 1,
+            std::format!(
+                "Unsupported json.base_scores.len() == {:?}",
+                json.base_scores.len()
+            )
+        );
+
         Ok(DecisionTreeModel {
             num_features: json.num_feature,
             trees,
+            average_tree_output: json.average_tree_output,
+            base_score: *json.base_scores.get(0).unwrap(),
         })
     }
 }
@@ -214,13 +258,14 @@ fn emit_node(
             right_child,
         }) => {
             fp.write_all(indent.as_bytes())?;
-            fp.write_all(b"if(arr[")?;
+            fp.write_all(b"if (arr[")?;
             fp.write_all(split_feature_id.to_string().as_bytes())?;
             fp.write_all(b"] ")?;
             fp.write_all(comparison_op.as_bytes())?;
+            fp.write_all(b" ")?;
             fp.write_all(threshold.to_string().as_bytes())?;
             fp.write_all(b")")?;
-            fp.write_all(b"{\n")?;
+            fp.write_all(b" {\n")?;
 
             let left_child_node = nodes.get(left_child).unwrap();
 
@@ -251,6 +296,48 @@ fn emit_node(
             fp.write_all(b";\n")?;
             fp.flush()?;
         }
+
+        Node::Categorical(CategoricalTestNode {
+            node_id: _,
+            left_child,
+            right_child,
+            split_feature_id,
+            category_list,
+        }) => {
+            fp.write_all(indent.as_bytes())?;
+            fp.write_all(b"tmp = (int)arr[")?;
+            fp.write_all(split_feature_id.to_string().as_bytes())?;
+            fp.write_all(b"];\n")?;
+
+            fp.write_all(indent.as_bytes())?;
+            fp.write_all(b"if (List.of(")?;
+
+            for (id, cat) in category_list.iter().enumerate() {
+                fp.write_all(cat.to_string().as_bytes())?;
+                if id != category_list.len() - 1 {
+                    fp.write_all(b",")?
+                }
+            }
+
+            fp.write_all(b").contains(tmp)) {\n")?;
+
+            let left_child_node = nodes.get(left_child).unwrap();
+
+            emit_node(left_child_node, nodes, depth + 1, fp)?;
+
+            fp.write_all(indent.as_bytes())?;
+
+            fp.write_all(b"} else {\n")?;
+
+            let right_child_node = nodes.get(right_child).unwrap();
+
+            emit_node(right_child_node, nodes, depth + 1, fp)?;
+
+            //fp.write_all(std::format!("// {:?}", node).as_bytes())?;
+
+            fp.write_all(indent.as_bytes())?;
+            fp.write_all(b"}\n")?;
+        }
     }
 
     Ok(())
@@ -269,12 +356,22 @@ fn emit_tree(tree: &Tree, destination: &str, tu_id: u32, package: &str) -> Resul
     fp.write_all(b"package ")?;
     fp.write_all(package.as_bytes())?;
     fp.write_all(b";\n\n")?;
+
+    fp.write_all(b"import java.util.List;\n\n")?;
+
     fp.write_all(b"final class Tree")?;
     fp.write_all(tu_id.to_string().as_bytes())?;
     fp.write_all(b"{\n\n")?;
+
     fp.write_all(b"  public static double predict(double[] arr){\n")?;
+
+    if tree.has_categorical_split {
+        fp.write_all(b"    int tmp;\n")?;
+    }
+
     fp.write_all(b"    double result = 0.0;\n")?;
-    emit_node(tree.first_node(), &tree.0, 2, &mut fp)?;
+
+    emit_node(tree.first_node(), &tree.inner, 2, &mut fp)?;
     fp.write_all(b"    return result;\n  }\n}")?;
 
     fp.flush()?;
@@ -287,6 +384,8 @@ fn emit_ensemble(
     package: &str,
     num_features: u32,
     num_trees: u32,
+    average_tree_output: bool,
+    base_score: f64,
 ) -> Result<()> {
     let destination = std::path::PathBuf::from(destination);
     let destination = destination.join("TreeEnsemble.java");
@@ -314,9 +413,25 @@ fn emit_ensemble(
         fp.write_all(b".predict(arr);\n")?;
     }
 
-    fp.write_all(b"     result /= ")?;
-    fp.write_all(num_trees.to_string().as_bytes())?;
-    fp.write_all(b".0;\n     return result;\n  }\n\n}")?;
+    if average_tree_output {
+        fp.write_all(b"     result /= ")?;
+        fp.write_all(num_trees.to_string().as_bytes())?;
+        fp.write_all(b".0;\n")?;
+    }
+
+    if base_score != 0.0 {
+        if base_score > 0.0 {
+            fp.write_all(b"     result += ")?;
+            fp.write_all(base_score.to_string().as_bytes())?;
+            fp.write_all(b";\n")?;
+        } else {
+            fp.write_all(b"     result -= ")?;
+            fp.write_all(base_score.abs().to_string().as_bytes())?;
+            fp.write_all(b";\n")?;
+        }
+    }
+
+    fp.write_all(b"     return result;\n  }\n\n}")?;
 
     fp.flush()?;
     tracing::debug!("Emitting ensemble done.");
@@ -324,7 +439,12 @@ fn emit_ensemble(
 }
 
 #[tracing::instrument(skip(model), err)]
-fn emit_java(model: &DecisionTreeModel, destination: &str, package: &str) -> Result<()> {
+fn emit_java(
+    model: &DecisionTreeModel,
+    destination: &str,
+    package: &str,
+    average_tree_output: bool,
+) -> Result<()> {
     tracing::info!("Emitting into {} ...", destination);
 
     let num_trees = model.trees.len() as u32;
@@ -337,7 +457,14 @@ fn emit_java(model: &DecisionTreeModel, destination: &str, package: &str) -> Res
 
     tracing::info!("destination = {:?}", destination);
 
-    emit_ensemble(destination, package, model.num_features, num_trees)?;
+    emit_ensemble(
+        destination,
+        package,
+        model.num_features,
+        num_trees,
+        average_tree_output,
+        model.base_score,
+    )?;
 
     let result: Result<Vec<()>> = model
         .trees
@@ -356,5 +483,10 @@ fn main() -> Result<()> {
 
     let model = DecisionTreeModel::from_json(cli.source.as_str())?;
 
-    emit_java(&model, cli.destination.as_str(), cli.package.as_str())
+    emit_java(
+        &model,
+        cli.destination.as_str(),
+        cli.package.as_str(),
+        model.average_tree_output,
+    )
 }
