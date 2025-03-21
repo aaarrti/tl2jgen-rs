@@ -43,7 +43,7 @@ mod parser {
         pub node_id: u32,
         pub leaf_value: Option<f64>,
         pub split_feature_id: Option<u32>,
-        pub default_left: Option<bool>,
+        // pub default_left: Option<bool>,
         pub comparison_op: Option<String>,
         pub threshold: Option<f64>,
         pub left_child: Option<u32>,
@@ -51,6 +51,7 @@ mod parser {
         pub node_type: Option<String>,
         pub has_categorical_split: Option<bool>,
         pub category_list: Option<Vec<u32>>,
+        pub category_list_right_child: Option<bool>
     }
 
     #[derive(Debug, Clone, Deserialize)]
@@ -135,6 +136,10 @@ impl TryFrom<parser::UnknownNode> for Node {
     fn try_from(value: parser::UnknownNode) -> Result<Self, Self::Error> {
         if let Some(true) = value.has_categorical_split {
             anyhow::bail!("Unsupported categorical split");
+        }
+
+        if let Some(false) = value.category_list_right_child {
+            anyhow::bail!("Unsupported category list right child");
         }
 
         if let Some(node_type) = value.node_type.as_deref() {
@@ -310,7 +315,7 @@ fn emit_node(
             fp.write_all(b"];\n")?;
 
             fp.write_all(indent.as_bytes())?;
-            fp.write_all(b"if (List.of(")?;
+            fp.write_all(b"if (!List.of(")?;
 
             for (id, cat) in category_list.iter().enumerate() {
                 fp.write_all(cat.to_string().as_bytes())?;
@@ -443,7 +448,6 @@ fn emit_java(
     model: &DecisionTreeModel,
     destination: &str,
     package: &str,
-    average_tree_output: bool,
 ) -> Result<()> {
     tracing::info!("Emitting into {} ...", destination);
 
@@ -462,7 +466,7 @@ fn emit_java(
         package,
         model.num_features,
         num_trees,
-        average_tree_output,
+        model.average_tree_output,
         model.base_score,
     )?;
 
@@ -487,6 +491,5 @@ fn main() -> Result<()> {
         &model,
         cli.destination.as_str(),
         cli.package.as_str(),
-        model.average_tree_output,
     )
 }
